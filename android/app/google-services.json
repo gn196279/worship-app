@@ -1,0 +1,62 @@
+{
+  "project_info": {
+    "project_number": "363230106030",
+    "project_id": "my-worship-app-2cf1e",
+    "storage_bucket": "my-worship-app-2cf1e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:363230106030:android:fd1941e0789d9217a4383f",
+        "android_client_info": {
+          "package_name": "com.example.gilgal_telugu_worship"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "363230106030-9c25t9n7q3eu1fflfgsef7giribqkeps.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.gilgal_telugu_worship",
+            "certificate_hash": "479ca7e303bb4ba22466ca56f2ea7d581756b379"
+          }
+        },
+        {
+          "client_id": "363230106030-mirpbun0h567r14psdr6bvf9pnmce12r.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.gilgal_telugu_worship",
+            "certificate_hash": "0aff9c4dc035c076b5cef6585792674dc2c0a0df"
+          }
+        },
+        {
+          "client_id": "363230106030-m9bi6v887a7umhl9pu0jmmatr62p1li6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA8BCL_wE1hTBKZQWtNY92Kn7SsZEX9mYQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "363230106030-m9bi6v887a7umhl9pu0jmmatr62p1li6.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "363230106030-t6p3r2t46enbvjg32sbe9pf9ic38eb69.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.gilgalTeluguWorship"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,50 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Prefer custom claims for admin checks.
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn(); // per requirement: any authenticated user
+      allow create: if isOwner(userId);
+      allow update: if isAdmin() || isOwner(userId);
+      allow delete: if isAdmin();
+    }
+
+    match /songs/{songId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || isSoftDeleteOnly();
+      allow delete: if isAdmin();
+    }
+
+    function isSoftDeleteOnly() {
+      return isSignedIn()
+          && request.resource.data.isDeleted == true
+          && request.resource.data.diff(resource.data).changedKeys()
+              .hasOnly(['isDeleted', 'deletedAt']);
+    }
+
+    match /sets/{setId} {
+      allow read, create: if isSignedIn();
+      allow update, delete: if isAdmin() || isOwner(resource.data.createdBy);
+    }
+
+    match /notes/{noteId} {
+      allow read, create: if isSignedIn();
+      allow update, delete: if isAdmin() || isOwner(resource.data.createdBy);
+    }
+  }
+}
+

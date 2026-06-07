@@ -1,0 +1,15 @@
+Gilgal_Telugu_worship_songs_app:
+=================================
+-> user will be able to upload the Pdf containing the list of songs
+-> where this file will need decoded propely from that file we are gathering the list of songs and make sure to convert that in a json file and store locally in the app
+-> Need to Create a home Page where we have (a) search box needed where we can search this list of songs in that searchbox with the text search .
+-> we will be able to show that hint of searched text . we will be able tos select that search . 
+-> after selecting the that particular song , we will be able to add that in the particualr  section of list .
+-> we need to implement the pdf button where we can download the selected songs as a single pdf like that.
+
+
+Tech stack:
+flutter , and their packages
+no server is involved only local all this tasks will be done 
+no data base need to use proper data base like hive or sharedpreference for this 
+if possible need to implement like optimised performance no lags , should be super fast uploadin and searching and seltig the songs and convert in to the pdf

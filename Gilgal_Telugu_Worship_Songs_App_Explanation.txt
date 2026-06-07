@@ -1,0 +1,42 @@
+Gilgal Telugu Worship Songs App
+===============================
+
+Overview
+--------
+This app allows users to manage Telugu worship songs efficiently. Users can upload a PDF containing a list of songs, which the app will decode, extract, and store locally in a searchable format. The app is designed for fast, offline use with a focus on performance and user experience.
+
+Features
+--------
+1. PDF Upload & Song Extraction
+   - Users can upload a PDF file containing a list of songs.
+   - The app will decode and extract song data from the PDF.
+   - Extracted songs are converted into a JSON format and stored locally for quick access.
+
+2. Home Page & Search
+   - The home page features a search box for finding songs by text.
+   - As users type, search suggestions (hints) are shown.
+   - Users can select a song from the search results.
+
+3. Song Selection & List Management
+   - After searching, users can select songs to add to a custom list (e.g., for a worship session).
+   - Selected songs are managed in a separate section for easy review and editing.
+
+4. PDF Export
+   - Users can export their selected songs as a single PDF file.
+   - This allows for easy sharing or printing of custom song lists.
+
+Technical Stack
+---------------
+- Flutter: Main framework for cross-platform mobile development.
+- Local Storage: No server or cloud backend; all data is stored locally.
+  - Use Hive or SharedPreferences for storing song data and user selections.
+- Performance: The app should be highly optimized for speed:
+  - Fast PDF upload and parsing.
+  - Instant search and selection.
+  - Quick PDF export.
+
+Notes
+-----
+- No external server or online database is used; all operations are performed on the device.
+- The app should be user-friendly, responsive, and handle large song lists without lag.
+- All features should work offline.
