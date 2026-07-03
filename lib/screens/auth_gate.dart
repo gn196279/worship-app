@@ -27,25 +27,29 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<AuthProvider, ({bool isLoading, User? user})>(
-      selector: (_, auth) => (isLoading: auth.isLoading, user: auth.firebaseUser),
+    return Selector<AuthProvider, ({bool isLoading, bool isRoleReady, User? user})>(
+      selector: (_, auth) => (
+        isLoading: auth.isLoading,
+        isRoleReady: auth.isRoleReady,
+        user: auth.firebaseUser,
+      ),
       builder: (context, state, _) {
-        // Resolve the actual destination widget.
         Widget destination;
 
         if (state.isLoading) {
-          // Auth state not yet known — show the same SplashScreen that was
-          // visible during Hive/Firebase init. The transition is invisible
-          // because the pixels are identical (no flash, no jump).
           destination = const SplashScreen(key: ValueKey('splash'));
         } else if (state.user != null) {
-          destination = const HomeScreen(key: ValueKey('home'));
+          // Wait for Firestore role before HomeScreen — avoids singer fallback UI.
+          if (!state.isRoleReady) {
+            destination = const SplashScreen(key: ValueKey('role-loading'));
+          } else {
+            destination = const HomeScreen(key: ValueKey('home'));
+          }
         } else {
           destination = FutureBuilder<bool>(
             future: _guestModeFuture,
             builder: (context, snapshot) {
               if (!snapshot.hasData) {
-                // Guest-mode preference still loading — keep the splash.
                 return const SplashScreen(key: ValueKey('splash'));
               }
               return snapshot.data == true
@@ -55,8 +59,6 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        // AnimatedSwitcher gives a smooth fade when the destination changes
-        // (e.g. SplashScreen → HomeScreen once auth is confirmed).
         return AnimatedSwitcher(
           duration: const Duration(milliseconds: 350),
           switchInCurve: Curves.easeOut,
@@ -67,4 +69,3 @@ class _AuthGateState extends State<AuthGate> {
     );
   }
 }
-

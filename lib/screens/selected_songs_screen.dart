@@ -5,9 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:provider/provider.dart';
 import '../models/song.dart';
+import '../providers/auth_provider.dart';
 import '../providers/song_provider.dart';
 import '../theme/app_colors.dart';
+import '../utils/access_control.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/login_required_dialog.dart';
 import '../widgets/song_detail_dialog.dart';
 
 class SelectedSongsScreen extends StatefulWidget {
@@ -175,6 +178,16 @@ class _SelectedSongsScreenState extends State<SelectedSongsScreen> {
 
   Future<void> _downloadSelectedPdf() async {
     if (_isExporting) return;
+
+    final auth = context.read<AuthProvider>();
+    final access = AccessControl.from(
+      isGuestMode: auth.firebaseUser == null,
+      firestoreRole: auth.appUser?.role,
+    );
+    if (!access.canDownloadPdf) {
+      await showLoginRequiredDialog(context, feature: 'download PDFs');
+      return;
+    }
 
     setState(() => _isExporting = true);
     AppSnackBar.info(context, 'Preparing your PDF...');

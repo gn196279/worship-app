@@ -6,17 +6,21 @@ import 'package:share_plus/share_plus.dart';
 import '../models/song.dart';
 import '../providers/song_provider.dart';
 import '../theme/app_colors.dart';
+import '../utils/access_control.dart';
+import '../utils/lyrics_display_helper.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/chord_chart_widget.dart';
+import '../widgets/login_required_dialog.dart';
 import 'song_edit_screen.dart';
 
 class SongDetailScreen extends StatefulWidget {
   final Song song;
-  final bool isGuest;
+  final AccessControl access;
 
   const SongDetailScreen({
     super.key,
     required this.song,
-    this.isGuest = false,
+    this.access = const AccessControl(isGuest: false, role: 'singer'),
   });
 
   @override
@@ -26,11 +30,11 @@ class SongDetailScreen extends StatefulWidget {
 class _SongDetailScreenState extends State<SongDetailScreen> {
   late Song _currentSong;
 
+  AccessControl get access => widget.access;
+
   @override
   void initState() {
     super.initState();
-    // Start with the passed song immediately (no null flash).
-    // Then try to find a fresher version from the in-memory provider list.
     _currentSong = widget.song;
     _loadSong();
   }
@@ -88,12 +92,31 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
     );
   }
 
+  Future<void> _shareSong() async {
+    if (!access.canShare) {
+      await showLoginRequiredDialog(context, feature: 'share songs');
+      return;
+    }
+    final song = _currentSong;
+    final shareText = [
+      'Song: ${song.displayTitle}',
+      if (song.displayLyrics != LyricsDisplayHelper.bookletLyricsFallback)
+        song.displayLyrics,
+      if (song.lyricsEnglish?.trim().isNotEmpty == true) song.lyricsEnglish!,
+    ].where((text) => text.trim().isNotEmpty).join('\n\n');
+    await Share.share(shareText);
+  }
+
   @override
   Widget build(BuildContext context) {
     final song = _currentSong;
-    final isGuest = widget.isGuest;
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final tabs = <Tab>[
+      const Tab(text: 'Telugu'),
+      const Tab(text: 'English'),
+      if (access.canViewChords) const Tab(text: 'Chart'),
+    ];
 
     return Scaffold(
       backgroundColor:
@@ -111,7 +134,7 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
               ?.copyWith(fontWeight: FontWeight.bold),
         ),
         actions: [
-          if (!isGuest)
+          if (access.canEditSongs)
             IconButton(
               icon: Icon(Icons.edit, color: theme.iconTheme.color),
               tooltip: 'Edit Song',
@@ -120,20 +143,12 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
           IconButton(
             icon: Icon(Icons.share, color: theme.iconTheme.color),
             tooltip: 'Share',
-            onPressed: () async {
-              final shareText = [
-                'Song: ${song.displayTitle}',
-                song.lyrics ?? '',
-                if (song.lyricsEnglish?.trim().isNotEmpty == true)
-                  song.lyricsEnglish!,
-              ].where((text) => text.trim().isNotEmpty).join('\n\n');
-              await Share.share(shareText);
-            },
+            onPressed: () => unawaited(_shareSong()),
           ),
         ],
       ),
       body: DefaultTabController(
-        length: 3, // Always show 3 tabs: Telugu, English, Chords
+        length: tabs.length,
         child: Column(
           children: [
             Padding(
@@ -141,7 +156,6 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Song Header
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -212,11 +226,7 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
                     labelColor: theme.colorScheme.primary,
                     unselectedLabelColor: theme.hintColor,
                     indicatorColor: theme.colorScheme.primary,
-                    tabs: const [
-                      Tab(text: 'Telugu'),
-                      Tab(text: 'English'),
-                      Tab(text: 'Chords'),
-                    ],
+                    tabs: tabs,
                   ),
                 ],
               ),
@@ -224,18 +234,19 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
             Expanded(
               child: TabBarView(
                 children: [
-                  // Telugu Tab
                   SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-                    child: song.lyrics?.trim().isNotEmpty == true
+                    child: song.displayLyrics.trim().isNotEmpty
                         ? SelectableText(
-                            song.lyrics!,
+                            song.displayLyrics,
                             style: theme.textTheme.bodyLarge?.copyWith(
                               fontSize: 18,
                               height: 1.8,
                               fontFamily: 'Noto Sans Telugu',
                               letterSpacing: 0.3,
-                              color: theme.textTheme.bodyLarge?.color,
+                              color: song.usesBookletLyricsFallback
+                                  ? theme.hintColor
+                                  : theme.textTheme.bodyLarge?.color,
                             ),
                             textAlign: TextAlign.left,
                           )
@@ -249,7 +260,6 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
                             ),
                           ),
                   ),
-                  // English Tab (show lyrics as fallback when lyricsEnglish is empty, e.g. PDF-extracted songs)
                   SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                     child: song.lyricsEnglish?.trim().isNotEmpty == true
@@ -263,7 +273,8 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
                             ),
                             textAlign: TextAlign.left,
                           )
-                        : song.lyrics?.trim().isNotEmpty == true
+                        : song.displayLyrics.trim().isNotEmpty &&
+                                !song.usesBookletLyricsFallback
                             ? Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -278,7 +289,7 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
                                     ),
                                   ),
                                   SelectableText(
-                                    song.lyrics!,
+                                    song.displayLyrics,
                                     style: theme.textTheme.bodyLarge?.copyWith(
                                       fontSize: 18,
                                       height: 1.8,
@@ -299,42 +310,24 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
                                 ),
                               ),
                   ),
-                  // Chords Tab
-                  SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-                    child: song.chords?.trim().isNotEmpty == true
-                        ? SelectableText(
-                            song.chords!,
-                            style: TextStyle(
-                              fontSize: 18,
-                              height: 1.7,
-                              fontFamily: 'Courier',
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                              color: theme.colorScheme.onSurface,
-                            ),
-                            textAlign: TextAlign.left,
-                            enableInteractiveSelection: true,
-                          )
-                        : Center(
-                            child: Text(
-                              'No chords available\nYou can add them later',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.hintColor,
-                              ),
-                            ),
-                          ),
-                  ),
+                  if (access.canViewChords)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+                      child: ChordChartWidget(
+                        chordProText: song.effectiveChordProText,
+                        onChordTap: (chord) {
+                          AppSnackBar.info(context, 'Chord: $chord');
+                        },
+                      ),
+                    ),
                 ],
               ),
             ),
           ],
         ),
       ),
-      floatingActionButton: isGuest
-          ? null
-          : FloatingActionButton.extended(
+      floatingActionButton: access.canUsePlaylist
+          ? FloatingActionButton.extended(
               onPressed: () {
                 final songProvider = context.read<SongProvider>();
                 final songToAdd = _currentSong;
@@ -351,7 +344,8 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
               backgroundColor: theme.colorScheme.primary,
               icon: const Icon(Icons.add),
               label: const Text('Add to Playlist'),
-            ),
+            )
+          : null,
     );
   }
 }

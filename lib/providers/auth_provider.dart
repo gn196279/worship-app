@@ -13,130 +13,82 @@ class AuthProvider extends ChangeNotifier {
   final UserRoleService _roleService;
   final UserPreferencesService _prefsService = UserPreferencesService();
   StreamSubscription<User?>? _authSub;
+  StreamSubscription<AppUser?>? _roleSub;
 
   User? _firebaseUser;
   AppUser? _appUser;
-  bool _isLoading = false;
+  bool _authStateLoading = true;
 
   User? get firebaseUser => _firebaseUser;
   AppUser? get appUser => _appUser;
-  bool get isLoading => _isLoading;
 
-  void _setSignedInUserForUi(User user) {
-    _firebaseUser = user;
-    _isLoading = false;
-    notifyListeners();
-    unawaited(_prefsService.setGuestMode(false));
-  }
+  /// True while Firebase auth is resolving or Firestore role is loading.
+  bool get isLoading =>
+      _authStateLoading || (_firebaseUser != null && _appUser == null);
+
+  /// True once Firestore role is available for the signed-in user.
+  bool get isRoleReady => _firebaseUser == null || _appUser != null;
 
   AuthProvider({
     AuthService? authService,
     UserRoleService? roleService,
   })  : _authService = authService ?? AuthService(),
-        _roleService = roleService ?? UserRoleService(),
-        _isLoading = false {
-    final currentUser = _authService.currentUser;
-
-    if (currentUser != null) {
-      // Session is immediately available — no loading needed.
-      _firebaseUser = currentUser;
-      _isLoading = false;
-      unawaited(_prefsService.setGuestMode(false));
-      unawaited(
-        _roleService
-            .getOrCreateUser(
-          uid: currentUser.uid,
-          email: currentUser.email,
-          displayName: currentUser.displayName,
-        )
-            .then((u) {
-          _appUser = u;
-          notifyListeners();
-        }).catchError((e) {
-          debugPrint('Failed to load user role: $e');
-        }),
-      );
-    } else {
-      // Firebase is initialised but the session hasn't been confirmed yet.
-      // Keep loading=true until authStateChanges fires so the UI never
-      // flashes the WelcomeScreen before we know the real auth state.
-      _isLoading = true;
-    }
-
+        _roleService = roleService ?? UserRoleService() {
     _authSub = _authService.authStateChanges.listen(_onAuthChanged);
   }
 
   Future<void> _onAuthChanged(User? user) async {
+    await _roleSub?.cancel();
+    _roleSub = null;
     _firebaseUser = user;
     _appUser = null;
-    _isLoading = false;
+    _authStateLoading = false;
     notifyListeners();
 
     if (user == null) return;
 
-    unawaited(_prefsService.setGuestMode(false));
-    unawaited(
-      _roleService
-          .getOrCreateUser(
+    try {
+      await _prefsService.setGuestMode(false);
+      final profile = await _roleService.getOrCreateUser(
         uid: user.uid,
         email: user.email,
         displayName: user.displayName,
-      )
-          .then((loadedUser) {
-        _appUser = loadedUser;
-        notifyListeners();
-      }).catchError((e) {
-        debugPrint('Failed to load user role: $e');
-      }),
-    );
+      );
+
+      // Ignore stale auth events (e.g. rapid sign-out during load).
+      if (_firebaseUser?.uid != user.uid) return;
+
+      _appUser = profile;
+      notifyListeners();
+
+      _roleSub = _roleService.watchUser(user.uid).listen(
+        (liveUser) {
+          if (liveUser == null || _firebaseUser?.uid != user.uid) return;
+          if (_appUser?.role != liveUser.role ||
+              _appUser?.displayName != liveUser.displayName) {
+            _appUser = liveUser;
+            notifyListeners();
+          }
+        },
+        onError: (e) {
+          debugPrint('Role listener error: $e');
+        },
+      );
+    } catch (e) {
+      debugPrint('Failed to load user role: $e');
+    } finally {
+      notifyListeners();
+    }
   }
 
-  Future<UserCredential> signInWithGoogle() async {
-    final credential = await _authService.signInWithGoogle();
-    final user = credential.user;
-    if (user != null) {
-      _setSignedInUserForUi(user);
-    }
-    return credential;
-  }
+  Future<UserCredential> signInWithGoogle() => _authService.signInWithGoogle();
 
   Future<void> signOut() => _authService.signOut();
-
-  Future<void> sendSignInOtp(String email) => _authService.sendSignInOtp(email);
-
-  Future<UserCredential> signInWithEmailLink(
-    String email,
-    String emailLink,
-  ) async {
-    final credential = await _authService.signInWithEmailLink(email, emailLink);
-    final user = credential.user;
-    if (user != null) {
-      _setSignedInUserForUi(user);
-    }
-    return credential;
-  }
-
-  Future<UserCredential> signUpWithEmail(String email, String password) async {
-    final credential = await _authService.signUpWithEmail(email, password);
-    final user = credential.user;
-    if (user != null) {
-      _setSignedInUserForUi(user);
-    }
-    return credential;
-  }
-
-  Future<UserCredential> signInWithEmail(String email, String password) async {
-    final credential = await _authService.signInWithEmail(email, password);
-    final user = credential.user;
-    if (user != null) {
-      _setSignedInUserForUi(user);
-    }
-    return credential;
-  }
 
   @override
   void dispose() {
     _authSub?.cancel();
+    _roleSub?.cancel();
     super.dispose();
   }
 }

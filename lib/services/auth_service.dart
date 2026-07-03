@@ -50,49 +50,4 @@ class AuthService {
     }
     await firebaseSignOut;
   }
-
-  // Email link (OTP) authentication
-  Future<void> sendSignInOtp(String email) async {
-    await _auth.sendSignInLinkToEmail(
-      email: email,
-      actionCodeSettings: ActionCodeSettings(
-        url: 'https://my-worship-app-2cf1e.firebaseapp.com',
-        handleCodeInApp: true,
-        iOSBundleId: 'com.example.gilgalTeluguWorship',
-        androidPackageName: 'com.example.gilgal_telugu_worship',
-        androidInstallApp: true,
-        androidMinimumVersion: '21',
-      ),
-    );
-  }
-
-  Future<UserCredential> signInWithEmailLink(
-    String email,
-    String emailLink,
-  ) async {
-    if (_auth.isSignInWithEmailLink(emailLink)) {
-      return _auth.signInWithEmailLink(email: email, emailLink: emailLink);
-    }
-    throw FirebaseAuthException(
-      code: 'invalid-email-link',
-      message: 'The provided link is not a valid sign-in link.',
-    );
-  }
-
-  Future<UserCredential> signUpWithEmail(
-    String email,
-    String password,
-  ) async {
-    return _auth.createUserWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-  }
-
-  Future<UserCredential> signInWithEmail(
-    String email,
-    String password,
-  ) async {
-    return _auth.signInWithEmailAndPassword(email: email, password: password);
-  }
 }

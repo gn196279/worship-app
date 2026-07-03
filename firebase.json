@@ -1,1 +1,33 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"my-worship-app-2cf1e","appId":"1:363230106030:android:fd1941e0789d9217a4383f","fileOutput":"android/app/google-services.json"},"buildConfigurations":{".":{"projectId":"my-worship-app-2cf1e","appId":"1:363230106030:android:fd1941e0789d9217a4383f","fileOutput":"android/app/google-services.json"}}},"dart":{"lib/firebase_options.dart":{"projectId":"my-worship-app-2cf1e","configurations":{"android":"1:363230106030:android:fd1941e0789d9217a4383f","ios":"1:363230106030:ios:c4de32f3d43407aaa4383f","web":"1:363230106030:web:64653e45e415eaa2a4383f"}}}}}}
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "my-worship-app-2cf1e",
+          "appId": "1:363230106030:android:fd1941e0789d9217a4383f",
+          "fileOutput": "android/app/google-services.json"
+        },
+        "buildConfigurations": {
+          ".": {
+            "projectId": "my-worship-app-2cf1e",
+            "appId": "1:363230106030:android:fd1941e0789d9217a4383f",
+            "fileOutput": "android/app/google-services.json"
+          }
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "my-worship-app-2cf1e",
+          "configurations": {
+            "android": "1:363230106030:android:fd1941e0789d9217a4383f",
+            "ios": "1:363230106030:ios:c4de32f3d43407aaa4383f",
+            "web": "1:363230106030:web:64653e45e415eaa2a4383f"
+          }
+        }
+      }
+    }
+  }
+}

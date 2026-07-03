@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import '../models/import_parse_result.dart';
 import '../models/song.dart';
 import '../services/pdf_service.dart';
+import '../services/song_import_parser.dart';
 import '../services/song_storage_service.dart';
 import '../services/search_service.dart';
 import '../utils/load_songs_from_json.dart';
@@ -19,12 +21,17 @@ class SongProvider extends ChangeNotifier {
   StreamSubscription? _firestoreSubscription;
   StreamSubscription<User?>? _authSubscription;
 
-  // ── Hidden category ────────────────────────────────────────────────────
-  // Songs from the Gilgal 2025-2026 PDF booklet (≈40 songs) are stored in
-  // Firestore/Hive under this category. They are not shown in the UI for now.
-  static const String _hiddenCategory = 'Gilgal Worship 2025-2026';
+  static const String _removedBookletCategory = 'Gilgal Worship 2025-2026';
+  static const String _removedBookletIdPrefix = 'gilgal2025_';
 
-  static bool _isVisible(Song song) => song.category != _hiddenCategory;
+  static bool isRemovedBookletSong(Song song) {
+    if (song.category == _removedBookletCategory) return true;
+    if (song.id.startsWith(_removedBookletIdPrefix)) return true;
+    return false;
+  }
+
+  List<Song> _withoutRemovedBooklet(Iterable<Song> songs) =>
+      songs.where((song) => !isRemovedBookletSong(song)).toList();
 
   List<Song> _allSongs = [];
   List<Song> _selectedSongs = [];
@@ -32,6 +39,7 @@ class SongProvider extends ChangeNotifier {
   List<Song> _searchResults = [];
   bool _isLoading = false;
   String _searchQuery = '';
+  bool _chordsOnlyFilter = false;
   Timer? _searchDebounce;
   Timer? _searchIndexDebounce;
   Timer? _selectedSaveDebounce;
@@ -56,6 +64,9 @@ class SongProvider extends ChangeNotifier {
   List<Song> get searchResults => _searchResults;
   bool get isLoading => _isLoading;
   String get searchQuery => _searchQuery;
+  bool get chordsOnlyFilter => _chordsOnlyFilter;
+  int get chordSongCount =>
+      _allSongs.where((song) => song.hasChordData).length;
   bool isSelected(String songId) => _selectedSongIds.contains(songId);
 
   SongProvider() {
@@ -89,9 +100,14 @@ class SongProvider extends ChangeNotifier {
 
     final box = Hive.box<Song>('songs');
     List<Song> loadedSongs = await _readSongsFromHiveInBatches(box);
-
-    // Strip hidden-category songs from the cache.
-    loadedSongs = loadedSongs.where(_isVisible).toList();
+    final hiveCount = loadedSongs.length;
+    loadedSongs = _withoutRemovedBooklet(loadedSongs);
+    if (hiveCount != loadedSongs.length) {
+      await box.clear();
+      if (loadedSongs.isNotEmpty) {
+        await box.putAll({for (final song in loadedSongs) song.id: song});
+      }
+    }
 
     // If the cache has very few songs it means a PDF import replaced the real
     // library. Clear everything so we fall back to the bundled songs.json.
@@ -107,7 +123,7 @@ class SongProvider extends ChangeNotifier {
       loadedSongs.sort((a, b) => a.displayTitle.compareTo(b.displayTitle));
       _allSongs = loadedSongs;
       if (_searchQuery.trim().isEmpty) {
-        _searchResults = _allSongs;
+        _searchResults = _filteredSongs(_allSongs);
       }
       _isLoading = false;
       notifyListeners(); // show songs immediately; index built after
@@ -119,8 +135,7 @@ class SongProvider extends ChangeNotifier {
 
     // Prefer local JSON file if it exists (user-imported songs)
     if (loadedSongs.isEmpty) {
-      final localSongs =
-          (await _storageService.loadLocalSongs()).where(_isVisible).toList();
+      final localSongs = _withoutRemovedBooklet(await _storageService.loadLocalSongs());
       // Only trust the local file if it contains a real library (not a tiny PDF import)
       if (localSongs.length >= 100) {
         await box.clear();
@@ -136,6 +151,7 @@ class SongProvider extends ChangeNotifier {
     if (loadedSongs.isEmpty) {
       final jsonString = await rootBundle.loadString('assets/songs.json');
       loadedSongs = await JsonParserHelper.parseSongsFromJson(jsonString);
+      loadedSongs = _withoutRemovedBooklet(loadedSongs);
       // Use putAll for a single bulk write instead of 700 individual awaited puts.
       await box.putAll({for (final song in loadedSongs) song.id: song});
       await _storageService.saveLocalSongs(loadedSongs);
@@ -145,7 +161,7 @@ class SongProvider extends ChangeNotifier {
     loadedSongs.sort((a, b) => a.displayTitle.compareTo(b.displayTitle));
     _allSongs = loadedSongs;
     if (_searchQuery.trim().isEmpty) {
-      _searchResults = _allSongs;
+      _searchResults = _filteredSongs(_allSongs);
     }
     _isLoading = false;
     notifyListeners(); // show songs immediately; index built after
@@ -224,7 +240,7 @@ class SongProvider extends ChangeNotifier {
             }
             final song = Song.fromJson(data);
 
-            if (!_isVisible(song)) {
+            if (isRemovedBookletSong(song)) {
               if (songsById.remove(song.id) != null) {
                 songsChanged = true;
               }
@@ -251,7 +267,7 @@ class SongProvider extends ChangeNotifier {
       _allSongs = merged;
       final selectedChanged = _syncSelectedSongsWithAllSongs(songsById);
       if (_searchQuery.trim().isEmpty) {
-        _searchResults = _allSongs;
+        _searchResults = _filteredSongs(_allSongs);
       }
 
       if (selectedChanged) {
@@ -276,7 +292,8 @@ class SongProvider extends ChangeNotifier {
         a.category == b.category &&
         a.lyrics == b.lyrics &&
         a.lyricsEnglish == b.lyricsEnglish &&
-        a.chords == b.chords;
+        a.chords == b.chords &&
+        a.chordProText == b.chordProText;
   }
 
   bool _syncSelectedSongsWithAllSongs(Map<String, Song> songsById) {
@@ -507,10 +524,31 @@ class SongProvider extends ChangeNotifier {
       await FirebaseFirestore.instance
           .collection('songs')
           .doc(updatedSong.id)
-          .set(updatedSong.toJson());
+          .set(updatedSong.toJson(), SetOptions(merge: true));
     } catch (e) {
       debugPrint('[SongProvider] Firestore sync error: $e');
       rethrow;
+    }
+  }
+
+  /// Uploads imported/edited songs to Firestore so all signed-in users receive them.
+  Future<void> _syncSongsToFirestore(List<Song> songs) async {
+    if (FirebaseAuth.instance.currentUser == null) {
+      throw StateError('Sign in is required to sync songs to the cloud.');
+    }
+    if (songs.isEmpty) return;
+
+    const batchLimit = 400;
+    for (var start = 0; start < songs.length; start += batchLimit) {
+      final end = (start + batchLimit).clamp(0, songs.length);
+      final batch = FirebaseFirestore.instance.batch();
+      for (var i = start; i < end; i++) {
+        final song = songs[i];
+        final ref =
+            FirebaseFirestore.instance.collection('songs').doc(song.id);
+        batch.set(ref, song.toJson(), SetOptions(merge: true));
+      }
+      await batch.commit();
     }
   }
 
@@ -546,6 +584,22 @@ class SongProvider extends ChangeNotifier {
   // =========================
   // SEARCH - DEBOUNCED & FAST
   // =========================
+  void setChordsOnlyFilter(bool enabled) {
+    if (_chordsOnlyFilter == enabled) return;
+    _chordsOnlyFilter = enabled;
+    if (_searchQuery.trim().isEmpty) {
+      _searchResults = _filteredSongs(_allSongs);
+    } else {
+      _runSearch(_searchQuery);
+    }
+    notifyListeners();
+  }
+
+  List<Song> _filteredSongs(List<Song> songs) {
+    if (!_chordsOnlyFilter) return songs;
+    return songs.where((song) => song.hasChordData).toList();
+  }
+
   void searchSongs(String query) {
     _searchQuery = query;
     _searchDebounce?.cancel();
@@ -553,7 +607,7 @@ class SongProvider extends ChangeNotifier {
     // Clear: resolve immediately — no copy, no debounce needed
     if (query.trim().isEmpty) {
       _searchDebounce = null;
-      _searchResults = _allSongs;
+      _searchResults = _filteredSongs(_allSongs);
       notifyListeners();
       return;
     }
@@ -566,12 +620,14 @@ class SongProvider extends ChangeNotifier {
   }
 
   void _runSearch(String query) {
+    List<Song> results;
     if (_searchService.isIndexed) {
-      _searchResults = _searchService.search(query, maxResults: 50);
+      results = _searchService.search(query, maxResults: 50);
     } else {
-      _searchResults = _fallbackSearch(query, maxResults: 50);
+      results = _fallbackSearch(query, maxResults: 50);
       _scheduleSearchIndexRebuild(refreshActiveSearch: true);
     }
+    _searchResults = _filteredSongs(results);
     notifyListeners();
   }
 
@@ -582,14 +638,14 @@ class SongProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    final songs = await _pdfService.parseImagesToSongs();
-    if (songs.isEmpty) {
+    final result = await _pdfService.parseImagesToSongs();
+    if (!result.hasSongs) {
       _isLoading = false;
       notifyListeners();
       return false;
     }
 
-    await saveImportedSongs(songs);
+    await saveImportedSongs(result.songs);
     _isLoading = false;
     notifyListeners();
     return true;
@@ -619,7 +675,7 @@ class SongProvider extends ChangeNotifier {
     return _pdfService.parsePDFToSongs();
   }
 
-  Future<List<Song>> parseImagesForPreview() async {
+  Future<ImportParseResult> parseImagesForPreview() async {
     return _pdfService.parseImagesToSongs();
   }
 
@@ -642,32 +698,20 @@ class SongProvider extends ChangeNotifier {
 
     _allSongs = merged;
     if (_searchQuery.trim().isEmpty) {
-      _searchResults = _allSongs;
+      _searchResults = _filteredSongs(_allSongs);
     }
     _scheduleSearchIndexRebuild(
       refreshActiveSearch: _searchQuery.trim().isNotEmpty,
     );
     notifyListeners();
+
+    await _syncSongsToFirestore(normalized);
   }
 
   List<Song> _normalizeImportedSongs(List<Song> songs) {
-    final now = DateTime.now().millisecondsSinceEpoch;
     final List<Song> normalized = [];
     for (int i = 0; i < songs.length; i++) {
-      final song = songs[i];
-      final id = song.id.isNotEmpty ? song.id : 'song_${now}_$i';
-      normalized.add(
-        Song(
-          id: id,
-          title: song.title.trim().isEmpty ? 'Untitled' : song.title.trim(),
-          lyrics: song.lyrics?.trim(),
-          lyricsEnglish: song.lyricsEnglish?.trim(),
-          chords: song.chords?.trim(),
-          pageNumber: song.pageNumber ?? i + 1,
-          category: song.category ?? 'Worship',
-          createdAt: song.createdAt,
-        ),
-      );
+      normalized.add(SongImportParser.normalizeForSave(songs[i], fallbackIndex: i));
     }
     return normalized;
   }

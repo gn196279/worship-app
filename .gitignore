@@ -49,6 +49,7 @@ app.*.map.json
 
 # Secrets — never commit
 firestore-key.json
+secrets.json
 .env
 .env.*
 

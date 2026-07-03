@@ -9,13 +9,14 @@ import '../providers/theme_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/favorites_provider.dart';
 import '../models/song.dart';
+import '../utils/access_control.dart';
 import 'upload_pdf_screen.dart';
 import '../widgets/gilgal_style1_logo.dart';
 import '../theme/app_colors.dart';
 import 'selected_songs_screen.dart';
 import 'song_detail_screen.dart';
+import 'admin_screen.dart';
 import 'welcome_screen.dart';
-import '../widgets/app_snackbar.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -81,8 +82,11 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  void _showGuestBlocked(String feature) {
-    AppSnackBar.warning(context, 'Login with Google to use $feature.');
+  AccessControl _accessFor(User? firebaseUser, [String? firestoreRole]) {
+    return AccessControl.from(
+      isGuestMode: firebaseUser == null && _isGuest,
+      firestoreRole: firestoreRole,
+    );
   }
 
   Future<void> _logoutGuest() async {
@@ -147,7 +151,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return spans.isEmpty ? [TextSpan(text: text)] : spans;
   }
 
-  Widget _buildSuggestionTile(Song song, String searchQuery) {
+  Widget _buildSuggestionTile(
+    Song song,
+    String searchQuery,
+    AccessControl access,
+  ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
@@ -156,7 +164,10 @@ class _HomeScreenState extends State<HomeScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => SongDetailScreen(song: song),
+            builder: (context) => SongDetailScreen(
+              song: song,
+              access: access,
+            ),
           ),
         );
       },
@@ -373,11 +384,20 @@ class _HomeScreenState extends State<HomeScreen> {
         hasSongs: provider.allSongs.isNotEmpty,
       ),
       builder: (context, songData, _) {
-        return Selector<AuthProvider, User?>(
-          selector: (_, auth) => auth.firebaseUser,
-          builder: (context, firebaseUser, _) {
+        return Selector<AuthProvider, ({User? user, String? role})>(
+          selector: (_, auth) => (
+            user: auth.firebaseUser,
+            role: auth.appUser?.role,
+          ),
+          builder: (context, authData, _) {
             return _buildMainContent(
-                context, theme, isDark, songData, firebaseUser);
+              context,
+              theme,
+              isDark,
+              songData,
+              authData.user,
+              authData.role,
+            );
           },
         );
       },
@@ -390,11 +410,13 @@ class _HomeScreenState extends State<HomeScreen> {
     bool isDark,
     ({bool isLoading, bool hasSongs}) songData,
     User? firebaseUser,
+    String? firestoreRole,
   ) {
     final songsLoading = songData.isLoading;
     final hasSongs = songData.hasSongs;
     final auth = context.read<AuthProvider>();
     final themeProvider = context.read<ThemeProvider>();
+    final access = _accessFor(firebaseUser, firestoreRole);
     const primaryColor = AppColors.primary;
     const lightBackground = AppColors.lightBackground;
     const darkBackground = AppColors.darkBackground;
@@ -553,7 +575,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: theme.textTheme.bodyMedium,
                         ),
                         Text(
-                          'Role: ${auth.appUser?.role ?? 'user'}',
+                          'Role: ${access.roleLabel}',
                           style: theme.textTheme.bodySmall,
                         ),
                       ],
@@ -617,11 +639,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: Column(
                       children: [
-                        // Search Bar
+                        // Search Bar (+ chord filter for musicians/admins)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                           child: Container(
-                            height: 56,
                             decoration: BoxDecoration(
                               color: isDark
                                   ? const Color(0xFF1F2937)
@@ -640,71 +661,138 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ],
                             ),
-                            child: Row(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Container(
-                                  width: 56,
+                                SizedBox(
                                   height: 56,
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? const Color(0xFF1F2937)
-                                        : const Color(0xFFF3F4F6),
-                                    borderRadius: const BorderRadius.only(
-                                      topLeft: Radius.circular(12),
-                                      bottomLeft: Radius.circular(12),
-                                    ),
-                                  ),
-                                  child: const Icon(
-                                    Icons.search,
-                                    color: primaryColor,
-                                    size: 24,
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 56,
+                                        height: 56,
+                                        decoration: BoxDecoration(
+                                          color: isDark
+                                              ? const Color(0xFF1F2937)
+                                              : const Color(0xFFF3F4F6),
+                                          borderRadius:
+                                              const BorderRadius.only(
+                                            topLeft: Radius.circular(12),
+                                          ),
+                                        ),
+                                        child: const Icon(
+                                          Icons.search,
+                                          color: primaryColor,
+                                          size: 24,
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: TextField(
+                                          controller: _searchController,
+                                          onChanged: _handleSearch,
+                                          onSubmitted: (value) {
+                                            if (value.trim().isNotEmpty) {
+                                              _addToRecentSearches(
+                                                value.trim(),
+                                              );
+                                            }
+                                          },
+                                          style: theme.textTheme.bodyLarge,
+                                          decoration: InputDecoration(
+                                            hintText: access.canViewChords
+                                                ? 'Search songs or filter chords…'
+                                                : 'Search in Telugu or English...',
+                                            hintStyle: theme
+                                                .textTheme.bodyMedium
+                                                ?.copyWith(
+                                              color: theme.hintColor,
+                                            ),
+                                            border: InputBorder.none,
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 16,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      ValueListenableBuilder<bool>(
+                                        valueListenable: _isSearchingNotifier,
+                                        builder: (_, isSearching, __) {
+                                          if (!isSearching) {
+                                            return const SizedBox(width: 48);
+                                          }
+                                          return IconButton(
+                                            icon: Icon(
+                                              Icons.clear,
+                                              color: theme.hintColor,
+                                            ),
+                                            onPressed: () {
+                                              _searchController.clear();
+                                              _isSearchingNotifier.value =
+                                                  false;
+                                              _songProvider.searchSongs('');
+                                            },
+                                          );
+                                        },
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                Expanded(
-                                  child: TextField(
-                                    controller: _searchController,
-                                    onChanged: _handleSearch,
-                                    onSubmitted: (value) {
-                                      if (value.trim().isNotEmpty) {
-                                        _addToRecentSearches(value.trim());
-                                      }
+                                if (access.canViewChords)
+                                  Selector<SongProvider,
+                                      ({bool on, int count})>(
+                                    selector: (_, provider) => (
+                                      on: provider.chordsOnlyFilter,
+                                      count: provider.chordSongCount,
+                                    ),
+                                    builder: (context, data, _) {
+                                      return Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          12,
+                                          0,
+                                          12,
+                                          10,
+                                        ),
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: FilterChip(
+                                            avatar: Icon(
+                                              Icons.music_note,
+                                              size: 18,
+                                              color: data.on
+                                                  ? Colors.white
+                                                  : primaryColor,
+                                            ),
+                                            label: Text(
+                                              'Chords only (${data.count})',
+                                              style: TextStyle(
+                                                color: data.on
+                                                    ? Colors.white
+                                                    : theme.textTheme
+                                                        .bodyMedium?.color,
+                                              ),
+                                            ),
+                                            selected: data.on,
+                                            selectedColor: primaryColor,
+                                            checkmarkColor: Colors.white,
+                                            side: BorderSide(
+                                              color: data.on
+                                                  ? primaryColor
+                                                  : primaryColor
+                                                      .withOpacity(0.35),
+                                            ),
+                                            onSelected: (selected) {
+                                              _songProvider
+                                                  .setChordsOnlyFilter(
+                                                selected,
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      );
                                     },
-                                    style: theme.textTheme.bodyLarge,
-                                    decoration: InputDecoration(
-                                      hintText:
-                                          'Search in Telugu or English...',
-                                      hintStyle:
-                                          theme.textTheme.bodyMedium?.copyWith(
-                                        color: theme.hintColor,
-                                      ),
-                                      border: InputBorder.none,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 16,
-                                      ),
-                                    ),
                                   ),
-                                ),
-                                ValueListenableBuilder<bool>(
-                                  valueListenable: _isSearchingNotifier,
-                                  builder: (_, isSearching, __) {
-                                    if (!isSearching) {
-                                      return const SizedBox(width: 48);
-                                    }
-                                    return IconButton(
-                                      icon: Icon(
-                                        Icons.clear,
-                                        color: theme.hintColor,
-                                      ),
-                                      onPressed: () {
-                                        _searchController.clear();
-                                        _isSearchingNotifier.value = false;
-                                        _songProvider.searchSongs('');
-                                      },
-                                    );
-                                  },
-                                ),
                               ],
                             ),
                           ),
@@ -737,7 +825,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   Expanded(
                                     child: Text(
                                       'Signed in as ${auth.firebaseUser?.email ?? 'user'} '
-                                      '• role: ${auth.appUser?.role ?? 'user'}',
+                                      '• role: ${access.roleLabel}',
                                       style:
                                           theme.textTheme.bodySmall?.copyWith(
                                         color: theme.textTheme.bodySmall?.color,
@@ -756,14 +844,25 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: ValueListenableBuilder<bool>(
                             valueListenable: _isSearchingNotifier,
                             builder: (context, isSearching, _) {
-                              if (isSearching) {
-                                return Selector<SongProvider, List<Song>>(
-                                  selector: (_, p) => p.searchResults,
-                                  builder: (context, results, _) =>
-                                      _buildSearchResults(results),
-                                );
-                              }
-                              return _buildHomeContent();
+                              return Selector<SongProvider, bool>(
+                                selector: (_, p) => p.chordsOnlyFilter,
+                                builder: (context, chordsOnly, __) {
+                                  final showSongList = isSearching ||
+                                      (access.canViewChords && chordsOnly);
+                                  if (showSongList) {
+                                    return Selector<SongProvider, List<Song>>(
+                                      selector: (_, p) => p.searchResults,
+                                      builder: (context, results, _) =>
+                                          _buildSearchResults(
+                                        results,
+                                        access,
+                                        chordsOnly: chordsOnly,
+                                      ),
+                                    );
+                                  }
+                                  return _buildHomeContent();
+                                },
+                              );
                             },
                           ),
                         ),
@@ -843,8 +942,8 @@ class _HomeScreenState extends State<HomeScreen> {
         floatingActionButton: Selector<SongProvider, List<Song>>(
           selector: (_, provider) => provider.selectedSongs,
           builder: (context, selectedSongs, _) {
-            final isGuest = firebaseUser == null && _isGuest;
-            if (isGuest) return const SizedBox.shrink();
+            final access = _accessFor(firebaseUser, firestoreRole);
+            if (!access.canUsePlaylist) return const SizedBox.shrink();
             if (selectedSongs.isEmpty) return const SizedBox.shrink();
             return FloatingActionButton.extended(
               onPressed: () {
@@ -868,11 +967,21 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSearchResults(List<Song> results) {
+  Widget _buildSearchResults(
+    List<Song> results,
+    AccessControl access, {
+    bool chordsOnly = false,
+  }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final query = _searchController.text.trim();
 
     if (results.isEmpty) {
+      final emptyMessage = query.isNotEmpty
+          ? 'No songs found for "$query"'
+          : chordsOnly
+              ? 'No songs with chords found'
+              : 'No songs found';
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -884,7 +993,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'No songs found for "${_searchController.text}"',
+              emptyMessage,
               style: theme.textTheme.bodyLarge?.copyWith(
                 color: theme.hintColor,
               ),
@@ -895,14 +1004,23 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () {
                 _searchController.clear();
                 _isSearchingNotifier.value = false;
+                if (chordsOnly) {
+                  _songProvider.setChordsOnlyFilter(false);
+                }
                 _songProvider.searchSongs('');
               },
-              child: const Text('Clear search'),
+              child: Text(chordsOnly ? 'Clear filter' : 'Clear search'),
             ),
           ],
         ),
       );
     }
+
+    final headerLabel = query.isNotEmpty
+        ? 'SUGGESTIONS'
+        : chordsOnly
+            ? 'SONGS WITH CHORDS (${results.length})'
+            : 'SUGGESTIONS';
 
     return SingleChildScrollView(
       controller: _scrollController,
@@ -947,7 +1065,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   child: Text(
-                    'SUGGESTIONS',
+                    headerLabel,
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: theme.colorScheme.primary,
                       fontWeight: FontWeight.bold,
@@ -957,7 +1075,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 ...results.map((song) =>
-                    _buildSuggestionTile(song, _searchController.text)),
+                    _buildSuggestionTile(song, _searchController.text, access)),
               ],
             ),
           ),
@@ -970,10 +1088,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildHomeContent() {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    return Selector<AuthProvider, User?>(
-      selector: (_, auth) => auth.firebaseUser,
-      builder: (context, firebaseUser, _) {
-        return _buildHomeContentInner(context, theme, isDark, firebaseUser);
+    return Selector<AuthProvider, ({User? user, String? role})>(
+      selector: (_, auth) => (
+        user: auth.firebaseUser,
+        role: auth.appUser?.role,
+      ),
+      builder: (context, authData, _) {
+        return _buildHomeContentInner(
+          context,
+          theme,
+          isDark,
+          authData.user,
+          authData.role,
+        );
       },
     );
   }
@@ -983,8 +1110,9 @@ class _HomeScreenState extends State<HomeScreen> {
     ThemeData theme,
     bool isDark,
     User? firebaseUser,
+    String? firestoreRole,
   ) {
-    final isGuest = firebaseUser == null && _isGuest;
+    final access = _accessFor(firebaseUser, firestoreRole);
     const primaryColor = AppColors.primary;
 
     // ── Sliver-based layout ─────────────────────────────────────────────────
@@ -1077,27 +1205,25 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    Expanded(
-                      child: _buildCategoryCard(
-                        title: 'Add PDFs',
-                        icon: Icons.file_upload,
-                        iconColor: primaryColor,
-                        bgColor: primaryColor.withOpacity(0.1),
-                        onTap: () async {
-                          if (isGuest) {
-                            _showGuestBlocked('PDF upload');
-                            return;
-                          }
-                          await Navigator.push<bool>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const UploadPDFScreen(),
-                            ),
-                          );
-                        },
+                    if (access.canUpload) ...[
+                      Expanded(
+                        child: _buildCategoryCard(
+                          title: 'Add PDFs',
+                          icon: Icons.file_upload,
+                          iconColor: primaryColor,
+                          bgColor: primaryColor.withOpacity(0.1),
+                          onTap: () async {
+                            await Navigator.push<bool>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const UploadPDFScreen(),
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
+                      const SizedBox(width: 12),
+                    ],
                     Expanded(
                       child: _buildCategoryCard(
                         title: 'Favorites',
@@ -1107,49 +1233,68 @@ class _HomeScreenState extends State<HomeScreen> {
                             ? Colors.orange.withOpacity(0.2)
                             : Colors.orange[50]!,
                         showFavoritesCount: true,
-                        onTap: () {
-                          if (isGuest) {
-                            _showGuestBlocked('favorites');
-                            return;
-                          }
-                          _showFavoritesBottomSheet();
-                        },
+                        onTap: _showFavoritesBottomSheet,
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 12)),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: _buildCategoryCard(
-                    title: 'My List (Playlist)',
-                    icon: Icons.playlist_play,
-                    iconColor: Colors.green,
-                    bgColor: isDark
-                        ? Colors.green.withOpacity(0.2)
-                        : Colors.green[50]!,
-                    showSelectedCount: true,
-                    onTap: () {
-                      if (isGuest) {
-                        _showGuestBlocked('playlist');
-                        return;
-                      }
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const SelectedSongsScreen(),
-                        ),
-                      );
-                    },
+            if (access.canManageRoles) ...[
+              const SliverToBoxAdapter(child: SizedBox(height: 12)),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: _buildCategoryCard(
+                      title: 'Admin',
+                      icon: Icons.admin_panel_settings,
+                      iconColor: Colors.purple,
+                      bgColor: isDark
+                          ? Colors.purple.withOpacity(0.2)
+                          : Colors.purple[50]!,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const AdminScreen(),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
+            if (access.canUsePlaylist) ...[
+              const SliverToBoxAdapter(child: SizedBox(height: 12)),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: _buildCategoryCard(
+                      title: 'My List (Playlist)',
+                      icon: Icons.playlist_play,
+                      iconColor: Colors.green,
+                      bgColor: isDark
+                          ? Colors.green.withOpacity(0.2)
+                          : Colors.green[50]!,
+                      showSelectedCount: true,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SelectedSongsScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SliverToBoxAdapter(child: SizedBox(height: 24)),
 
             // ── All Songs ────────────────────────────────────────────────
@@ -1191,7 +1336,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         MaterialPageRoute(
                           builder: (_) => SongDetailScreen(
                             song: song,
-                            isGuest: isGuest,
+                            access: access,
                           ),
                         ),
                       ),
@@ -1232,15 +1377,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ],
                                 ),
                               ),
-                              _SongFavoriteButton(
-                                songId: song.id,
-                                isGuest: isGuest,
-                                onGuestBlocked: _showGuestBlocked,
-                              ),
+                              _SongFavoriteButton(songId: song.id),
                               _SongSelectButton(
                                 song: song,
-                                isGuest: isGuest,
-                                onGuestBlocked: _showGuestBlocked,
+                                access: access,
                               ),
                             ],
                           ),
@@ -1264,6 +1404,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showFavoritesBottomSheet() {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final auth = context.read<AuthProvider>();
+    final access = _accessFor(auth.firebaseUser, auth.appUser?.role);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1357,8 +1499,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) =>
-                                  SongDetailScreen(song: song),
+                              builder: (context) => SongDetailScreen(
+                                song: song,
+                                access: access,
+                              ),
                             ),
                           );
                         },
@@ -1403,15 +1547,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ],
                                 ),
                               ),
-                              _SongFavoriteButton(
-                                songId: song.id,
-                                isGuest: false,
-                                onGuestBlocked: _showGuestBlocked,
-                              ),
+                              _SongFavoriteButton(songId: song.id),
                               _SongSelectButton(
                                 song: song,
-                                isGuest: false,
-                                onGuestBlocked: _showGuestBlocked,
+                                access: access,
                               ),
                             ],
                           ),
@@ -1431,17 +1570,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _SongSelectButton extends StatelessWidget {
   final Song song;
-  final bool isGuest;
-  final void Function(String feature) onGuestBlocked;
+  final AccessControl access;
 
   const _SongSelectButton({
     required this.song,
-    required this.isGuest,
-    required this.onGuestBlocked,
+    required this.access,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (!access.canUsePlaylist) return const SizedBox.shrink();
+
     return Selector<SongProvider, bool>(
       selector: (_, provider) => provider.isSelected(song.id),
       builder: (context, isSelected, _) {
@@ -1454,10 +1593,6 @@ class _SongSelectButton extends StatelessWidget {
             size: 20,
           ),
           onPressed: () {
-            if (isGuest) {
-              onGuestBlocked('playlists');
-              return;
-            }
             final provider = context.read<SongProvider>();
             if (isSelected) {
               provider.removeFromSelected(song);
@@ -1476,14 +1611,8 @@ class _SongSelectButton extends StatelessWidget {
 /// list to rebuild — only this tiny 48×48 icon repaints.
 class _SongFavoriteButton extends StatefulWidget {
   final String songId;
-  final bool isGuest;
-  final void Function(String feature) onGuestBlocked;
 
-  const _SongFavoriteButton({
-    required this.songId,
-    required this.isGuest,
-    required this.onGuestBlocked,
-  });
+  const _SongFavoriteButton({required this.songId});
 
   @override
   State<_SongFavoriteButton> createState() => _SongFavoriteButtonState();
@@ -1493,15 +1622,10 @@ class _SongFavoriteButtonState extends State<_SongFavoriteButton> {
   bool _isPopping = false;
 
   void _toggle() {
-    if (widget.isGuest) {
-      widget.onGuestBlocked('favorites');
-      return;
-    }
     final fp = context.read<FavoritesProvider>();
     final wasFavorite = fp.isFavorite(widget.songId);
-    fp.toggle(widget.songId); // instant optimistic update
+    fp.toggle(widget.songId);
     if (!wasFavorite) {
-      // Pop animation only when adding (heart fills in)
       setState(() => _isPopping = true);
       Future.delayed(const Duration(milliseconds: 180), () {
         if (mounted) setState(() => _isPopping = false);

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../models/song.dart';
+import 'chord_pro_helper.dart';
 
 /// Parse JSON songs in background isolate to avoid blocking UI
 class JsonParserHelper {
@@ -17,9 +18,6 @@ class JsonParserHelper {
     for (int i = 0; i < jsonList.length; i++) {
       final e = jsonList[i] as Map<String, dynamic>;
 
-      // Skip songs from the Gilgal 2025-2026 PDF booklet (hidden for now).
-      final category = e['category']?.toString();
-      if (category == 'Gilgal Worship 2025-2026') continue;
       final rawTitle = e['title']?.toString();
 
       String id = e['id']?.toString() ?? 'song_$i';
@@ -36,6 +34,14 @@ class JsonParserHelper {
         pageNumber: e['pageNumber'] as int?,
         category: e['category'] as String?,
         chords: e['chords'] as String?,
+        chordProText: (e['chordProText'] as String?) ??
+            ((e['chords'] as String?)?.trim().isNotEmpty == true
+                ? ChordProHelper.normalizeFromLegacy(
+                    chords: e['chords'] as String?,
+                    lyrics: e['lyrics'] as String?,
+                    title: title,
+                  )
+                : null),
         createdAt: e['createdAt'] != null
             ? DateTime.tryParse(e['createdAt'] as String) ?? DateTime.now()
             : DateTime.now(),

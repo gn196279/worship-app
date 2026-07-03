@@ -9,7 +9,6 @@ import '../services/user_preferences_service.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/google_icon.dart';
 import 'auth_gate.dart';
-import 'sign_in_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -277,24 +276,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const SignInScreen(),
-                            ),
-                          );
-                        },
-                        child: const Text(
-                          'Sign in with Email',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white70,
-                            decoration: TextDecoration.underline,
-                          ),
-                        ),
-                      ),
                       const Text(
                         'Version 2.4.0 • Designed for Worship',
                         textAlign: TextAlign.center,

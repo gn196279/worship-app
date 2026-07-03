@@ -6,9 +6,22 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Prefer custom claims for admin checks.
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userRole() {
+      return userDoc().data.role;
+    }
+
     function isAdmin() {
-      return isSignedIn() && request.auth.token.admin == true;
+      return isSignedIn()
+          && (request.auth.token.admin == true || userRole() == 'admin');
+    }
+
+    function isMusicianOrAdmin() {
+      return isSignedIn()
+          && (userRole() == 'musician' || userRole() == 'admin');
     }
 
     function isOwner(userId) {
@@ -16,24 +29,24 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isSignedIn(); // per requirement: any authenticated user
-      allow create: if isOwner(userId);
-      allow update: if isAdmin() || isOwner(userId);
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId)
+          && request.resource.data.role == 'singer';
+      allow update: if isAdmin()
+          && request.auth.uid != userId
+          && request.resource.data.diff(resource.data).changedKeys()
+              .hasOnly(['role']);
+      allow update: if isOwner(userId)
+          && !request.resource.data.diff(resource.data).changedKeys()
+              .hasAny(['role']);
       allow delete: if isAdmin();
     }
 
     match /songs/{songId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isAdmin() || isSoftDeleteOnly();
+      allow create: if isMusicianOrAdmin();
+      allow update: if isMusicianOrAdmin();
       allow delete: if isAdmin();
-    }
-
-    function isSoftDeleteOnly() {
-      return isSignedIn()
-          && request.resource.data.isDeleted == true
-          && request.resource.data.diff(resource.data).changedKeys()
-              .hasOnly(['isDeleted', 'deletedAt']);
     }
 
     match /sets/{setId} {
@@ -47,4 +60,3 @@ service cloud.firestore {
     }
   }
 }
-

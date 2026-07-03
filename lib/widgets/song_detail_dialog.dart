@@ -92,11 +92,13 @@ class SongDetailDialog extends StatelessWidget {
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
                 child: SelectableText(
-                  song.lyrics ?? 'No lyrics available',
+                  song.displayLyrics.isNotEmpty
+                      ? song.displayLyrics
+                      : (song.lyrics ?? 'No lyrics available'),
                   style: TextStyle(
                     fontSize: 16,
                     height: 1.8,
-                    fontFamily: 'monospace',
+                    fontFamily: 'Noto Sans Telugu',
                     color: isDark ? Colors.grey[300] : Colors.black87,
                   ),
                 ),
@@ -123,7 +125,7 @@ class SongDetailDialog extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Chords and lyrics preserved in original format',
+                    'Telugu lyrics — same format as song detail and PDF download',
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark ? Colors.grey[500] : Colors.grey[600],

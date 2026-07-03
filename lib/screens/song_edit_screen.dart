@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 
 import '../models/song.dart';
 import '../theme/app_colors.dart';
+import '../utils/chord_pro_helper.dart';
 import 'package:provider/provider.dart';
 import '../providers/song_provider.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/chord_pro_editor.dart';
 
 class SongEditScreen extends StatefulWidget {
   final Song song;
@@ -22,11 +24,11 @@ class SongEditScreen extends StatefulWidget {
 }
 
 class _SongEditScreenState extends State<SongEditScreen> {
-  bool _saved = false; // guard against double-taps
+  bool _saved = false;
   late final TextEditingController _titleController;
   late final TextEditingController _lyricsController;
   late final TextEditingController _lyricsEnglishController;
-  late final TextEditingController _chordsController;
+  late final TextEditingController _chordProController;
 
   @override
   void initState() {
@@ -35,7 +37,9 @@ class _SongEditScreenState extends State<SongEditScreen> {
     _lyricsController = TextEditingController(text: widget.song.lyrics ?? '');
     _lyricsEnglishController =
         TextEditingController(text: widget.song.lyricsEnglish ?? '');
-    _chordsController = TextEditingController(text: widget.song.chords ?? '');
+    _chordProController = TextEditingController(
+      text: ChordProHelper.resolve(widget.song),
+    );
   }
 
   @override
@@ -43,7 +47,7 @@ class _SongEditScreenState extends State<SongEditScreen> {
     _titleController.dispose();
     _lyricsController.dispose();
     _lyricsEnglishController.dispose();
-    _chordsController.dispose();
+    _chordProController.dispose();
     super.dispose();
   }
 
@@ -59,7 +63,6 @@ class _SongEditScreenState extends State<SongEditScreen> {
     _saved = true;
 
     final songProvider = Provider.of<SongProvider>(context, listen: false);
-    // New manual songs (manual_*) get next available hymn number so they don't show as Hymn #0
     int? pageNumber = widget.song.pageNumber;
     if (pageNumber == null && widget.song.id.startsWith('manual_')) {
       final maxPage = songProvider.allSongs.fold<int>(0, (m, s) {
@@ -69,19 +72,24 @@ class _SongEditScreenState extends State<SongEditScreen> {
       pageNumber = maxPage + 1;
     }
 
+    final chordProText = _chordProController.text.trim();
+    final teluguLyrics = _lyricsController.text.trim().isNotEmpty
+        ? _lyricsController.text.trim()
+        : ChordProHelper.stripChords(chordProText);
+
     final updated = Song(
       id: widget.song.id,
       title: titleText,
-      lyrics: _lyricsController.text.trim(),
+      lyrics: teluguLyrics,
       lyricsEnglish: _lyricsEnglishController.text.trim(),
-      chords: _chordsController.text.trim(),
+      chords: chordProText,
+      chordProText: chordProText,
       pageNumber: pageNumber,
       category: widget.song.category,
       createdAt: widget.song.createdAt,
     );
 
     if (widget.saveInProvider) {
-      // Sync in background so save feels instant.
       unawaited(
         songProvider.updateSong(updated).catchError(
               (e) => debugPrint('[SongEditScreen] Background sync error: $e'),
@@ -89,7 +97,6 @@ class _SongEditScreenState extends State<SongEditScreen> {
       );
     }
 
-    // Pop immediately — local state is already updated inside updateSong()
     if (mounted) Navigator.pop(context, updated);
   }
 
@@ -127,12 +134,16 @@ class _SongEditScreenState extends State<SongEditScreen> {
                 labelText: 'Telugu Lyrics',
                 alignLabelWithHint: true,
                 border: OutlineInputBorder(),
-                helperText: 'Enter Telugu lyrics here',
+                helperText: 'Plain Telugu lyrics (optional if in chart below)',
               ),
               maxLines: null,
-              minLines: 10,
+              minLines: 6,
               keyboardType: TextInputType.multiline,
-              style: const TextStyle(fontSize: 16, height: 1.5),
+              style: const TextStyle(
+                fontSize: 16,
+                height: 1.5,
+                fontFamily: 'NotoSansTelugu',
+              ),
             ),
             const SizedBox(height: 20),
             TextField(
@@ -144,29 +155,12 @@ class _SongEditScreenState extends State<SongEditScreen> {
                 helperText: 'Enter English transliteration here',
               ),
               maxLines: null,
-              minLines: 10,
+              minLines: 6,
               keyboardType: TextInputType.multiline,
               style: const TextStyle(fontSize: 16, height: 1.5),
             ),
             const SizedBox(height: 20),
-            TextField(
-              controller: _chordsController,
-              decoration: const InputDecoration(
-                labelText: 'Chords',
-                alignLabelWithHint: true,
-                border: OutlineInputBorder(),
-                helperText: 'Enter chords (e.g., Am, G, D)',
-              ),
-              maxLines: null,
-              minLines: 1,
-              keyboardType: TextInputType.multiline,
-              style: const TextStyle(
-                fontSize: 18,
-                height: 1.5,
-                fontFamily: 'Courier',
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            ChordProEditor(controller: _chordProController),
             const SizedBox(height: 40),
           ],
         ),

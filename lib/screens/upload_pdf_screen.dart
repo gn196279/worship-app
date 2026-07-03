@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/song.dart';
+import '../providers/auth_provider.dart';
 import '../providers/song_provider.dart';
+import '../utils/access_control.dart';
 import 'song_import_preview_screen.dart';
 import '../theme/app_colors.dart';
 import 'under_construction_screen.dart';
@@ -21,6 +23,32 @@ class UploadPDFScreen extends StatefulWidget {
 class _UploadPDFScreenState extends State<UploadPDFScreen> {
   static const bool _uploadsEnabled = true;
   bool _isUploading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _guardAccess());
+  }
+
+  void _guardAccess() {
+    if (!mounted) return;
+    final auth = context.read<AuthProvider>();
+    if (auth.firebaseUser != null && auth.appUser == null) {
+      Future.delayed(const Duration(milliseconds: 300), _guardAccess);
+      return;
+    }
+    final access = AccessControl.from(
+      isGuestMode: auth.firebaseUser == null,
+      firestoreRole: auth.appUser?.role,
+    );
+    if (!access.canUpload) {
+      Navigator.of(context).pop();
+      AppSnackBar.warning(
+        context,
+        'Upload is available for musicians and admins only.',
+      );
+    }
+  }
 
   // =======================
   // PICK PDF
@@ -53,19 +81,28 @@ class _UploadPDFScreenState extends State<UploadPDFScreen> {
         if (updatedSongs != null && updatedSongs.isNotEmpty) {
           await provider.saveImportedSongs(updatedSongs);
           if (mounted) {
-            _showSuccessDialog(updatedSongs.length, updatedSongs);
+            _showSuccessDialog(
+              updatedSongs.length,
+              updatedSongs,
+              syncedToCloud: true,
+            );
           }
         }
       } else {
         AppSnackBar.warning(
           context,
-          'No PDF selected or no text found.\n\nTip: Make sure the PDF contains clear Telugu text.',
-          duration: const Duration(seconds: 4),
+          'Could not read any songs from this PDF.\n\n'
+          'Try a clearer PDF or use "Upload Images Instead" for scanned pages.',
+          duration: const Duration(seconds: 5),
         );
       }
     } catch (e) {
       if (mounted) {
-        AppSnackBar.error(context, 'Error processing PDF: $e');
+        AppSnackBar.error(
+          context,
+          'Save failed: $e\n\nSongs must sync to the cloud for other users to see them.',
+          duration: const Duration(seconds: 5),
+        );
       }
     } finally {
       if (mounted) {
@@ -88,36 +125,46 @@ class _UploadPDFScreenState extends State<UploadPDFScreen> {
       setState(() => _isUploading = true);
 
       final provider = Provider.of<SongProvider>(context, listen: false);
-      final songs = await provider.parseImagesForPreview();
+      final result = await provider.parseImagesForPreview();
 
       if (!mounted) return;
 
-      if (songs.isNotEmpty) {
+      if (result.hasSongs) {
         final updatedSongs = await Navigator.push<List<Song>>(
           context,
           MaterialPageRoute(
             builder: (context) => SongImportPreviewScreen(
               title: 'Preview Image Songs',
-              songs: songs,
+              songs: result.songs,
             ),
           ),
         );
         if (updatedSongs != null && updatedSongs.isNotEmpty) {
           await provider.saveImportedSongs(updatedSongs);
           if (mounted) {
-            _showSuccessDialog(updatedSongs.length, updatedSongs);
+            _showSuccessDialog(
+              updatedSongs.length,
+              updatedSongs,
+              syncedToCloud: true,
+            );
           }
         }
       } else {
         AppSnackBar.warning(
           context,
-          'No images selected or no text found.\n\nTip: Make sure images contain clear Telugu text.',
-          duration: const Duration(seconds: 4),
+          result.errorMessage ??
+              'No images selected or no text found.\n\n'
+              'Use a clear full-page screenshot with Telugu lyrics and chords.',
+          duration: const Duration(seconds: 8),
         );
       }
     } catch (e) {
       if (mounted) {
-        AppSnackBar.error(context, 'Error processing images: $e');
+        AppSnackBar.error(
+          context,
+          'Save failed: $e\n\nSongs must sync to the cloud for other users to see them.',
+          duration: const Duration(seconds: 5),
+        );
       }
     } finally {
       if (mounted) {
@@ -129,7 +176,11 @@ class _UploadPDFScreenState extends State<UploadPDFScreen> {
   // =======================
   // SUCCESS DIALOG
   // =======================
-  void _showSuccessDialog(int songCount, List<Song> songs) {
+  void _showSuccessDialog(
+    int songCount,
+    List<Song> songs, {
+    bool syncedToCloud = false,
+  }) {
     final songTitles = songs.take(3).map((s) => s.title).join('\n');
 
     showDialog(
@@ -141,6 +192,13 @@ class _UploadPDFScreenState extends State<UploadPDFScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Successfully parsed $songCount songs!'),
+              if (syncedToCloud) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'Saved to this device and synced to Firestore — all signed-in users will receive these songs.',
+                  style: TextStyle(color: Colors.green),
+                ),
+              ],
               const SizedBox(height: 16),
               const Text(
                 'First few songs:',
@@ -279,6 +337,13 @@ class _UploadPDFScreenState extends State<UploadPDFScreen> {
                             color: AppColors.primary.withOpacity(0.5)),
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Screenshots: on-device OCR (free, works offline). '
+                    'Best for chord names and romanized lyrics.',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.hintColor),
                   ),
                 ],
               ),

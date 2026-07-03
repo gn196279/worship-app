@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/app_user.dart';
+import '../models/user_role.dart';
 
 class UserRoleService {
   UserRoleService({FirebaseFirestore? firestore})
@@ -17,33 +18,39 @@ class UserRoleService {
     required String? email,
     required String? displayName,
   }) async {
-    final doc = await _users.doc(uid).get();
-    if (doc.exists && doc.data() != null) {
-      return AppUser.fromMap(doc.data()!, doc.id);
-    }
+    final ref = _users.doc(uid);
 
-    final user = AppUser(
-      uid: uid,
-      email: email,
-      displayName: displayName,
-      role: 'user',
-      createdAt: DateTime.now(),
-    );
+    return _firestore.runTransaction((transaction) async {
+      final snap = await transaction.get(ref);
+      if (snap.exists && snap.data() != null) {
+        return AppUser.fromMap(snap.data()!, snap.id);
+      }
 
-    try {
-      await _users.doc(uid).set(user.toMap());
-    } catch (e) {
-      debugPrint('Failed to create user doc: $e');
-    }
-
-    return user;
+      final user = AppUser(
+        uid: uid,
+        email: email,
+        displayName: displayName,
+        role: UserRole.singer,
+        createdAt: DateTime.now(),
+      );
+      transaction.set(ref, user.toMap());
+      return user;
+    });
   }
 
+  /// Admin-only: assign a role to another user (never self).
   Future<void> updateRole({
-    required String uid,
+    required String adminUid,
+    required String targetUid,
     required String role,
   }) async {
-    await _users.doc(uid).update({'role': role});
+    if (adminUid == targetUid) {
+      throw StateError('You cannot change your own role.');
+    }
+    if (!UserRole.all.contains(role)) {
+      throw ArgumentError.value(role, 'role', 'Invalid role');
+    }
+    await _users.doc(targetUid).update({'role': role});
   }
 
   Stream<AppUser?> watchUser(String uid) {

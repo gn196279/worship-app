@@ -1,3 +1,5 @@
+import 'user_role.dart';
+
 class AppUser {
   final String uid;
   final String? email;
@@ -18,7 +20,7 @@ class AppUser {
       uid: uid,
       email: data['email'] as String?,
       displayName: data['displayName'] as String?,
-      role: (data['role'] as String?) ?? 'user',
+      role: UserRole.normalize(data['role'] as String?),
       createdAt: DateTime.tryParse((data['createdAt'] as String?) ?? '') ??
           DateTime.now(),
     );
